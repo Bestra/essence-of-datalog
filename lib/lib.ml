@@ -14,7 +14,7 @@ type program = rule list
 
 type knowledge_base = atom list
 
-type subsitution = (term * term) list
+type substitution = (term * term) list
 
 let empty_substitution = []
 
@@ -23,12 +23,12 @@ let empty_substitution = []
    where
    go sym@Sym{} = sym
    go var@Var{} = fromMaybe var (var `lookup` substitution) *)
-let substitute atom substitution =
+let substitute atom (substitution: substitution) =
   let go = function
     | Sym _ as s -> s
     | Var _ as v ->
-        let sub = List.Assoc.find substitution v ~equal:phys_equal in
-        Option.value sub ~default:v
+      let sub = List.Assoc.find substitution v ~equal:phys_equal in
+      Option.value sub ~default:v
   in
   {atom with terms= List.map ~f:go atom.terms}
 
@@ -48,12 +48,12 @@ unify (Atom predSym ts) (Atom predSym' ts')
       _                   -> return $ (v,s) : incompleteSubstitution
   go ((_, Var{}) : _) = error "The second atom is assumed to be ground." *)
 
-let unify {predSym; terms} {predSym= predSym'; terms= terms'} =
+let unify {predSym; terms} {predSym= predSym'; terms= terms'}: substitution option =
   let open Option.Let_syntax in
   let rec go = function
     | [] -> Some empty_substitution
     | ((Sym _ as s), (Sym _ as s')) :: rest ->
-        if phys_equal s s' then go rest else None
+      if phys_equal s s' then go rest else None
     | ((Var _ as v), (Sym _ as s)) :: rest -> (
         let%bind incomplete_substitution = go rest in
         match List.Assoc.find incomplete_substitution v ~equal:phys_equal with
@@ -62,3 +62,17 @@ let unify {predSym; terms} {predSym= predSym'; terms= terms'} =
     | (_, Var _) :: _ -> failwith "Foo"
   in
   if phys_equal predSym predSym' then List.zip_exn terms terms' |> go else None
+
+(* evalAtom :: KnowledgeBase -> Atom -> [ Substitution ] -> [ Substitution ]
+   evalAtom kb atom substitutions = do
+   substitution <- substitutions
+   let downToEarthAtom = substitute atom substitution
+   extension <- mapMaybe (unify downToEarthAtom) kb
+   return $ substitution <> extension *)
+
+let eval_atom kb atom substitutions =
+  List.concat_map substitutions ~f:(fun substitution ->
+      let down_to_earth_atom = substitute atom substitution in
+      List.map kb ~f:(unify down_to_earth_atom) |> List.filter_opt
+      |> List.map  ~f:(fun extension -> List.append substitution extension)
+    )
