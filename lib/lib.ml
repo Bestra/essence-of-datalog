@@ -8,7 +8,7 @@ type term = Var of string | Sym of string
 
 type atom = {predSym: string; terms: term list}
 
-type rule = {head: atom; body: atom}
+type rule = {head: atom; body: atom list}
 
 type program = rule list
 
@@ -71,8 +71,19 @@ let unify {predSym; terms} {predSym= predSym'; terms= terms'}: substitution opti
    return $ substitution <> extension *)
 
 let eval_atom kb atom substitutions =
+  let append_subs s1 s2: substitution = List.append s1 s2 in
+
   List.concat_map substitutions ~f:(fun substitution ->
       let down_to_earth_atom = substitute atom substitution in
-      List.map kb ~f:(unify down_to_earth_atom) |> List.filter_opt
-      |> List.map  ~f:(fun extension -> List.append substitution extension)
+      List.map kb ~f:(unify down_to_earth_atom) |> List.filter_opt |>
+      List.map  ~f:(fun extension -> append_subs substitution extension)
     )
+
+(* walk :: KnowledgeBase -> [ Atom ] -> [ Substitution ] *)
+
+let walk kb = List.fold_right ~f:(eval_atom kb) ~init:[ empty_substitution ]
+
+(* evalRule :: KnowledgeBase -> Rule -> KnowledgeBase
+evalRule kb (Rule head body) = map (substitute head) (walk kb body) *)
+let eval_rule kb {head; body} = List.map ~f:(substitute head) (walk kb body)
+
