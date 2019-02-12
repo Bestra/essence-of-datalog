@@ -4,9 +4,9 @@ open Base
    data Atom = Atom { _predSym :: String, _terms :: [ Term ] } deriving Eq
    data Term = Var String | Sym String deriving Eq *)
 
-type term = Var of string | Sym of string
+type term = Var of string | Sym of string [@@deriving compare]
 
-type atom = {predSym: string; terms: term list}
+type atom = {predSym: string; terms: term list} [@@deriving compare]
 
 type rule = {head: atom; body: atom list}
 
@@ -87,3 +87,31 @@ let walk kb = List.fold_right ~f:(eval_atom kb) ~init:[ empty_substitution ]
 evalRule kb (Rule head body) = map (substitute head) (walk kb body) *)
 let eval_rule kb {head; body} = List.map ~f:(substitute head) (walk kb body)
 
+(* immediateConsequence :: Program -> KnowledgeBase -> KnowledgeBase
+immediateConsequence rules kb =
+  nub . (kb <>) . concatMap (evalRule kb) $ rules *)
+
+let immediate_consequence (rules: program) (kb: knowledge_base): knowledge_base =
+  List.concat_map ~f:(eval_rule kb) rules
+  |> List.append kb
+  |> List.dedup_and_sort ~compare:compare_atom
+
+let is_range_restricted rules = true
+
+(* solve :: Program -> KnowledgeBase
+solve rules =
+  if all isRangeRestricted rules
+    then fix step []
+    else error "The input program is not range-restricted."
+  where
+  step :: (KnowledgeBase -> KnowledgeBase)
+       -> (KnowledgeBase -> KnowledgeBase)
+  step f currentKB | nextKB <- immediateConsequence rules currentKB =
+    if nextKB == currentKB
+      then currentKB
+      else f nextKB *)
+let solve (rules: program): knowledge_base =
+  let step f (current_kb :: next_kb :: _) =
+    if (phys_equal next_kb current_kb) then current_kb else f next_kb
+  in
+  
