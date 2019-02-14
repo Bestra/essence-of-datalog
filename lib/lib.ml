@@ -31,6 +31,9 @@ let rule head body = {head; body}
 
 let fact head = {head; body= []}
 
+let cmp_equal comparator =
+  (fun a b -> match (comparator a b) with | 0 -> true | _ -> false)
+
 (* substitute :: Atom -> Substitution -> Atom
    substitute atom substitution = atom { _terms = map go (_terms atom) }
    where
@@ -40,12 +43,12 @@ let substitute atom (substitution : substitution) =
   let go = function
     | Term.Sym _ as s -> s
     | Var _ as v ->
-        let sub = List.Assoc.find substitution v ~equal:phys_equal in
+        let sub = List.Assoc.find substitution v ~equal:(cmp_equal Term.compare) in
         Option.value sub ~default:v
   in
   {atom with terms= List.map ~f:go atom.terms}
 
-(* 
+(*
 unify :: Atom -> Atom -> Maybe Substitution
 unify (Atom predSym ts) (Atom predSym' ts')
   | predSym == predSym' = go $ zip ts ts'
@@ -67,15 +70,16 @@ let unify {predSym; terms} {predSym= predSym'; terms= terms'} :
   let rec go = function
     | [] -> Some empty_substitution
     | ((Term.Sym _ as s), (Term.Sym _ as s')) :: rest ->
-        if phys_equal s s' then go rest else None
+        if (cmp_equal Term.compare) s s' then go rest else None
     | ((Var _ as v), (Sym _ as s)) :: rest -> (
         let%bind incomplete_substitution = go rest in
-        match List.Assoc.find incomplete_substitution v ~equal:phys_equal with
-        | Some s' when not (phys_equal s s') -> None
+        match List.Assoc.find incomplete_substitution v ~equal:(cmp_equal Term.compare) with
+        | Some s' when not ((cmp_equal Term.compare) s s') -> None
         | _ -> Some ((v, s) :: incomplete_substitution) )
     | (_, Var _) :: _ -> failwith "Foo"
   in
-  if phys_equal predSym predSym' then List.zip_exn terms terms' |> go else None
+  (* Stdio.printf "Unifying %s and %s\n" predSym predSym'; *)
+  if (cmp_equal compare_string) predSym predSym' then List.zip_exn terms terms' |> go else None
 
 (* evalAtom :: KnowledgeBase -> Atom -> [ Substitution ] -> [ Substitution ]
    evalAtom kb atom substitutions = do
@@ -143,10 +147,13 @@ let is_range_restricted {head; body} =
 let solve (rules : program) : knowledge_base =
   let rec step current_kb =
     let next_kb = immediate_consequence rules current_kb in
-    (* (sexp_of_list sexp_of_atom current_kb) |> Sexp.to_string_hum |> Stdio.print_endline;
-    (sexp_of_list sexp_of_atom next_kb) |> Sexp.to_string_hum |> Stdio.print_endline; *)
+    Stdio.print_endline "***********step";
+    Stdio.print_endline "current kb ----------------";
+    (sexp_of_list sexp_of_atom current_kb) |> Sexp.to_string_hum |> Stdio.print_endline;
+    Stdio.print_endline "next kb ----------------";
+    (sexp_of_list sexp_of_atom next_kb) |> Sexp.to_string_hum |> Stdio.print_endline;
+    Stdio.print_endline "^^^^^^^^^step";
     let c = (compare_knowledge_base next_kb current_kb) in
-    Stdio.printf "compare: %i" c |> ignore;
     if c = 0 then current_kb else step next_kb
   in
   if List.for_all rules ~f:is_range_restricted then step []
@@ -196,10 +203,10 @@ let ancestor =
   ; (* rules *)
     rule
       (atom "academicAncestor" [Var "X"; Var "Y"])
-      [atom "Adviser" [Var "X"; Var "Y"]]
+      [atom "adviser" [Var "X"; Var "Y"]]
   ; rule
       (atom "academicAncestor" [Var "X"; Var "Z"])
-      [ atom "Adviser" [Var "X"; Var "Y"]
+      [ atom "adviser" [Var "X"; Var "Y"]
       ; atom "academicAncestor" [Var "Y"; Var "Z"] ]
   (* queries *)
   ; rule
@@ -227,14 +234,18 @@ query predSym pr =
   queryRules = filter ((== predSym) . _predSym . _head) pr
   queryVarsL = _terms . _head <$> queryRules *)
 
+type query_result = {vars: Term.t list; syms: Term.t list list} [@@deriving sexp]
+
 let query predSym pr =
-  let relevant_knowledge_base = List.filter (solve pr) ~f:(fun k -> phys_equal predSym k.predSym) in
+  let solved = solve pr in
+  Stdio.print_endline "********Solution";
+  sexp_of_list sexp_of_atom solved |> Sexp.to_string_hum |> Stdio.print_endline;
+  Stdio.print_endline "^^^^^^^^Solution";
+  let relevant_knowledge_base = List.filter solved ~f:(fun k -> (cmp_equal compare_string) predSym k.predSym) in
   let relevant_knowledge_base_syms = List.map ~f:(fun k -> k.terms) relevant_knowledge_base in
-  let query_rules = List.filter pr ~f:(fun r -> phys_equal predSym r.head.predSym) in
+  let query_rules = List.filter pr ~f:(fun r -> (cmp_equal compare_string) predSym r.head.predSym) in
   let query_vars = List.map query_rules ~f:(fun r -> r.head.terms) in
   match query_vars with
-  | [ vars ] -> (
-    vars, relevant_knowledge_base_syms
-  )
+  | [ vars ] -> {vars; syms=relevant_knowledge_base_syms}
   | [] -> failwith ("The query" ^ predSym ^ "does not exist")
   | _ -> failwith ("The query" ^ predSym ^ "has multiple clauses")
