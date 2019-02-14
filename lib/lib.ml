@@ -25,11 +25,36 @@ type substitution = (Term.t * Term.t) list [@@deriving sexp]
 
 let empty_substitution = []
 
-let atom predSym terms = {predSym; terms}
+let make_atom predSym terms = {predSym; terms}
 
-let rule head body = {head; body}
+let make_rule head body = {head; body}
 
-let fact head = {head; body= []}
+let make_fact head = {head; body= []}
+
+module Parser = struct
+  open Angstrom
+  let ws = skip_while (function
+  | '\x20' | '\x0a' | '\x0d' | '\x09' -> true
+  | _ -> false)
+
+  let atom = take_till (function | 'a' .. 'z' | 'A' .. 'Z' -> false | _ -> true)
+  let var = atom >>| (fun k -> Term.Var(k))
+  let sym = char '"' *> atom <* char '"' >>| (fun k -> Term.Sym(k))
+  let term = sym <|> var
+  let head = take_till (function | '(' -> true | _ -> false)
+  let horn_clause = lift2 (fun h terms -> (make_atom h terms))
+      (head <* char '(')  (sep_by (char ',' <* ws) term <* char ')')
+  let horn_clauses = sep_by (char ',' <* ws) horn_clause
+  let fact = horn_clause <* char('.') >>| make_fact
+  let rule = lift2
+    (fun head body -> make_rule head body)
+    (horn_clause <* ws <* string ":-" <* ws)
+    (horn_clauses <* char '.')
+  let line = fact <|> rule
+  let run_parser p s = parse_string p s
+
+  let parse_line s = parse_string line s
+end
 
 let cmp_equal comparator =
   (fun a b -> match (comparator a b) with | 0 -> true | _ -> false)
@@ -43,8 +68,8 @@ let substitute atom (substitution : substitution) =
   let go = function
     | Term.Sym _ as s -> s
     | Var _ as v ->
-        let sub = List.Assoc.find substitution v ~equal:(cmp_equal Term.compare) in
-        Option.value sub ~default:v
+      let sub = List.Assoc.find substitution v ~equal:(cmp_equal Term.compare) in
+      Option.value sub ~default:v
   in
   {atom with terms= List.map ~f:go atom.terms}
 
@@ -65,12 +90,12 @@ unify (Atom predSym ts) (Atom predSym' ts')
   go ((_, Var{}) : _) = error "The second atom is assumed to be ground." *)
 
 let unify {predSym; terms} {predSym= predSym'; terms= terms'} :
-    substitution option =
+  substitution option =
   let open Option.Let_syntax in
   let rec go = function
     | [] -> Some empty_substitution
     | ((Term.Sym _ as s), (Term.Sym _ as s')) :: rest ->
-        if (cmp_equal Term.compare) s s' then go rest else None
+      if (cmp_equal Term.compare) s s' then go rest else None
     | ((Var _ as v), (Sym _ as s)) :: rest -> (
         let%bind incomplete_substitution = go rest in
         match List.Assoc.find incomplete_substitution v ~equal:(cmp_equal Term.compare) with
@@ -109,7 +134,7 @@ let eval_rule kb {head; body} = List.map ~f:(substitute head) (walk kb body)
    nub . (kb <>) . concatMap (evalRule kb) $ rules *)
 
 let immediate_consequence (rules : program) (kb : knowledge_base) :
-    knowledge_base =
+  knowledge_base =
   List.concat_map ~f:(eval_rule kb) rules
   |> List.append kb
   |> List.dedup_and_sort ~compare:compare_atom
@@ -190,7 +215,7 @@ let solve (rules : program) : knowledge_base =
           [ Sym "David Wheeler", Sym "Mistral Contrastin" ] ]
    ] *)
 
-let adviser t = fact (atom "adviser" t)
+let adviser t = make_fact (make_atom "adviser" t)
 
 let ancestor =
   [ adviser [Sym "Andrew Rice"; Sym "Mistral Contrastin"]
@@ -201,38 +226,38 @@ let ancestor =
   ; adviser [Sym "Rod Burstall"; Sym "Alan Mycroft"]
   ; adviser [Sym "Robin Milner"; Sym "Alan Mycroft"]
   ; (* rules *)
-    rule
-      (atom "academicAncestor" [Var "X"; Var "Y"])
-      [atom "adviser" [Var "X"; Var "Y"]]
-  ; rule
-      (atom "academicAncestor" [Var "X"; Var "Z"])
-      [ atom "adviser" [Var "X"; Var "Y"]
-      ; atom "academicAncestor" [Var "Y"; Var "Z"] ]
+    make_rule
+      (make_atom "academicAncestor" [Var "X"; Var "Y"])
+      [make_atom "adviser" [Var "X"; Var "Y"]]
+  ; make_rule
+      (make_atom "academicAncestor" [Var "X"; Var "Z"])
+      [ make_atom "adviser" [Var "X"; Var "Y"]
+      ; make_atom "academicAncestor" [Var "Y"; Var "Z"] ]
   (* queries *)
-  ; rule
-      (atom "query1" [Var "Intermediate"])
-      [ atom "academicAncestor" [Sym "Robin Milner"; Var "Intermediate"]
-      ; atom "academicAncestor" [Var "Intermediate"; Sym "Mistral Contrastin"] ]
-  ; rule
-      (atom "query2" [])
-      [ atom "academicAncestor" [Sym "Alan Turing"; Sym "Mistral Contrastin"] ]
-  ; rule
-      (atom "query3" [])
-      [ atom "academicAncestor" [Sym "David Wheeler"; Sym "Mistral Contrastin"] ]
-   ]
+  ; make_rule
+      (make_atom "query1" [Var "Intermediate"])
+      [ make_atom "academicAncestor" [Sym "Robin Milner"; Var "Intermediate"]
+      ; make_atom "academicAncestor" [Var "Intermediate"; Sym "Mistral Contrastin"] ]
+  ; make_rule
+      (make_atom "query2" [])
+      [ make_atom "academicAncestor" [Sym "Alan Turing"; Sym "Mistral Contrastin"] ]
+  ; make_rule
+      (make_atom "query3" [])
+      [ make_atom "academicAncestor" [Sym "David Wheeler"; Sym "Mistral Contrastin"] ]
+  ]
 
 (* query :: String -> Program -> [ Substitution ]
-query predSym pr =
-  case queryVarsL of
+   query predSym pr =
+   case queryVarsL of
     [ queryVars ] -> zip queryVars <$> relevantKnowledgeBaseSyms
     [] -> error $ "The query '" ++ predSym ++ "' doesn't exist."
     _  -> error $ "The query '" ++ predSym ++ "' has multiple clauses."
-  where
-  relevantKnowledgeBase = filter ((== predSym) . _predSym) $ solve pr
-  relevantKnowledgeBaseSyms = _terms <$> relevantKnowledgeBase
+   where
+   relevantKnowledgeBase = filter ((== predSym) . _predSym) $ solve pr
+   relevantKnowledgeBaseSyms = _terms <$> relevantKnowledgeBase
 
-  queryRules = filter ((== predSym) . _predSym . _head) pr
-  queryVarsL = _terms . _head <$> queryRules *)
+   queryRules = filter ((== predSym) . _predSym . _head) pr
+   queryVarsL = _terms . _head <$> queryRules *)
 
 type query_result = {vars: Term.t list; syms: Term.t list list} [@@deriving sexp]
 
