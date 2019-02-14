@@ -13,15 +13,15 @@ module Term = struct
   include Comparator.Make (T)
 end
 
-type atom = {predSym: string; terms: Term.t list} [@@deriving compare]
+type atom = {predSym: string; terms: Term.t list} [@@deriving compare, sexp]
 
-type rule = {head: atom; body: atom list}
+type rule = {head: atom; body: atom list} [@@deriving sexp]
 
 type program = rule list
 
-type knowledge_base = atom list
+type knowledge_base = atom list [@@deriving compare]
 
-type substitution = (Term.t * Term.t) list
+type substitution = (Term.t * Term.t) list [@@deriving sexp]
 
 let empty_substitution = []
 
@@ -116,6 +116,7 @@ let immediate_consequence (rules : program) (kb : knowledge_base) :
    where
    vars Atom{..} = nub $ filter (\case {Var{} -> True; _ -> False}) _terms *)
 
+(* every var in the head must appear in the body *)
 let is_range_restricted {head; body} =
   let vars {terms; _} =
     List.filter terms ~f:(function Var _ -> true | _ -> false)
@@ -123,7 +124,7 @@ let is_range_restricted {head; body} =
   in
   let is_subsequence_of parent child =
     let term_set = Set.of_list (module Term) in
-    Set.is_subset ~of_:(term_set parent) (term_set child)
+    Set.is_subset ~of_:(term_set child) (term_set parent)
   in
   is_subsequence_of (vars head) (List.concat_map ~f:vars body)
 
@@ -142,7 +143,11 @@ let is_range_restricted {head; body} =
 let solve (rules : program) : knowledge_base =
   let rec step current_kb =
     let next_kb = immediate_consequence rules current_kb in
-    if phys_equal next_kb current_kb then current_kb else step next_kb
+    (* (sexp_of_list sexp_of_atom current_kb) |> Sexp.to_string_hum |> Stdio.print_endline;
+    (sexp_of_list sexp_of_atom next_kb) |> Sexp.to_string_hum |> Stdio.print_endline; *)
+    let c = (compare_knowledge_base next_kb current_kb) in
+    Stdio.printf "compare: %i" c |> ignore;
+    if c = 0 then current_kb else step next_kb
   in
   if List.for_all rules ~f:is_range_restricted then step []
   else failwith "The input program is not range-restricted"
