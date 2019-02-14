@@ -33,6 +33,8 @@ let make_fact head = {head; body= []}
 
 module Parser = struct
   open Angstrom
+
+  let remove_empty terms = List.filter terms ~f:(function | Term.Var("") | Sym("") -> false | _ -> true)
   let ws = skip_while (function
   | '\x20' | '\x0a' | '\x0d' | '\x09' -> true
   | _ -> false)
@@ -42,7 +44,7 @@ module Parser = struct
   let sym = char '"' *> atom <* char '"' >>| (fun k -> Term.Sym(k))
   let term = sym <|> var
   let head = take_till (function | '(' -> true | _ -> false)
-  let horn_clause = lift2 (fun h terms -> (make_atom h terms))
+  let horn_clause = lift2 (fun h terms -> (make_atom h (remove_empty terms)))
       (head <* char '(')  (sep_by (char ',' <* ws) term <* char ')')
   let horn_clauses = sep_by (char ',' <* ws) horn_clause
   let fact = horn_clause <* char('.') >>| make_fact
@@ -51,9 +53,11 @@ module Parser = struct
     (horn_clause <* ws <* string ":-" <* ws)
     (horn_clauses <* char '.')
   let line = fact <|> rule
+  let program = sep_by ws line
   let run_parser p s = parse_string p s
 
   let parse_line s = parse_string line s
+  let parse_program s = parse_string program s
 end
 
 let cmp_equal comparator =
@@ -170,14 +174,16 @@ let is_range_restricted {head; body} =
       then currentKB
       else f nextKB *)
 let solve (rules : program) : knowledge_base =
+  Stdio.print_endline "Program:";
+  sexp_of_list sexp_of_rule rules |> Sexp.to_string_hum |> Stdio.print_endline;
   let rec step current_kb =
     let next_kb = immediate_consequence rules current_kb in
-    Stdio.print_endline "***********step";
+    (* Stdio.print_endline "***********step";
     Stdio.print_endline "current kb ----------------";
     (sexp_of_list sexp_of_atom current_kb) |> Sexp.to_string_hum |> Stdio.print_endline;
     Stdio.print_endline "next kb ----------------";
     (sexp_of_list sexp_of_atom next_kb) |> Sexp.to_string_hum |> Stdio.print_endline;
-    Stdio.print_endline "^^^^^^^^^step";
+    Stdio.print_endline "^^^^^^^^^step"; *)
     let c = (compare_knowledge_base next_kb current_kb) in
     if c = 0 then current_kb else step next_kb
   in
@@ -263,10 +269,11 @@ type query_result = {vars: Term.t list; syms: Term.t list list} [@@deriving sexp
 
 let query predSym pr =
   let solved = solve pr in
-  Stdio.print_endline "********Solution";
+  Stdio.print_endline "Solution:";
   sexp_of_list sexp_of_atom solved |> Sexp.to_string_hum |> Stdio.print_endline;
-  Stdio.print_endline "^^^^^^^^Solution";
   let relevant_knowledge_base = List.filter solved ~f:(fun k -> (cmp_equal compare_string) predSym k.predSym) in
+  Stdio.printf "query returned %i symbols that matched \n" (List.length relevant_knowledge_base);
+  sexp_of_list sexp_of_atom relevant_knowledge_base |> Sexp.to_string_hum |> Stdio.print_endline;
   let relevant_knowledge_base_syms = List.map ~f:(fun k -> k.terms) relevant_knowledge_base in
   let query_rules = List.filter pr ~f:(fun r -> (cmp_equal compare_string) predSym r.head.predSym) in
   let query_vars = List.map query_rules ~f:(fun r -> r.head.terms) in

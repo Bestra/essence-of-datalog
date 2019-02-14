@@ -1,0 +1,5 @@
+parent("john", "douglas").
+parent("john", "bob").
+parent("john", "steve").
+query1(X) :- parent("john", X).
+query2() :- parent("dave", "douglas").
